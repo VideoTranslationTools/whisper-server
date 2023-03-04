@@ -1,0 +1,1 @@
+conda activate whisper & python main.py
