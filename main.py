@@ -87,7 +87,9 @@ def get_task_status(task_id: int):
         return None
     # 任务存在
     status = g_task_dic[task_id].task_status
-    del g_task_dic[task_id]
+    if status != 0 and status != 1:
+        # 如果 任务状态不是 0 和 1，说明任务已经完成，删除任务
+        del g_task_dic[task_id]
     return status
 
 
