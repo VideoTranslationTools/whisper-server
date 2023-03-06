@@ -15,6 +15,8 @@ parser.add_argument("--gpu_id", default='0', type=int)
 parser.add_argument("--model", default='large', type=str)  # tiny base small medium large
 # 启动的端口
 parser.add_argument("--port", default='5000', type=int)
+# http 接口的 token
+parser.add_argument("--token", default='1234567890', type=str)
 # 解析参数
 args = parser.parse_args()
 # 将arg_dict转换为dict格式
@@ -27,6 +29,8 @@ g_model = whisper.model
 g_task_dic = {}
 # 全局的任务列表
 g_task_list = []
+# http 接口的 token
+g_token = arg_dict['token']
 
 
 # 任务的状态 0 "pending", 1 "running", 2 "finished", 3 "error"
@@ -45,6 +49,19 @@ def hello():
 
 @app.route('/transcribe', methods=["GET", "POST"])
 def transcribe():
+
+    if request.headers.get('Authorization'):
+        get_token = request.headers['Authorization']
+        if get_token == "":
+            return jsonify({"code": 400, "msg": "token error"})
+        tokens = str.split(get_token, " ")
+        if len(tokens) != 2:
+            return jsonify({"code": 400, "msg": "token error"})
+        if tokens[1] != g_token:
+            return jsonify({"code": 400, "msg": "token error"})
+    else:
+        return jsonify({"code": 400, "msg": "token error"})
+
     if request.method == 'GET':
         # 获取任务的 id
         task_id = request.args.get("task_id")
