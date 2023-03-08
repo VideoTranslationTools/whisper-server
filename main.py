@@ -3,7 +3,7 @@ from loguru import logger
 from datetime import datetime
 
 import whisper
-from whisper.utils import ResultWriter, WriteTXT, WriteSRT, WriteVTT, WriteTSV, WriteJSON
+from whisper.utils import WriteSRT, WriteJSON
 import torch
 from pathlib import Path
 import argparse
@@ -43,6 +43,7 @@ class TranscribeData:
         self.task_id = task_id
         self.input_audio = input_audio_full_path
         self.task_status = 0
+        self.language = ""
 
 
 @app.route('/')
@@ -132,7 +133,26 @@ def task_transcribe():
         g_task_dic[tan_data.task_id] = tan_data
 
         logger.info("Transcription {task_id} start...", task_id=tan_data.task_id)
-        transcribe_result = g_model.transcribe(tan_data.input_audio)
+
+        # 检测文件是否存在
+        if not Path(tan_data.input_audio).exists():
+            logger.error("File {file} not found.", file=tan_data.input_audio)
+            tan_data.task_status = 3
+            g_task_dic[tan_data.task_id] = tan_data
+            continue
+
+        if tan_data.language == "":
+            # 检测语言
+            audio_lang = detect_language(tan_data.input_audio)
+            logger.info("Transcription {task_id} use language {language}.",
+                        task_id=tan_data.task_id, language=audio_lang)
+            transcribe_result = g_model.transcribe(tan_data.input_audio, language=audio_lang)
+        else:
+            # 使用提交的语言
+            logger.info("Transcription {task_id} use language {language}.",
+                        task_id=tan_data.task_id, language=tan_data.language)
+            transcribe_result = g_model.transcribe(tan_data.input_audio, language=tan_data.language)
+
         logger.info("Transcription {task_id} complete.", task_id=tan_data.task_id)
         # 构建输出的路径
         p = Path(tan_data.input_audio)
@@ -148,8 +168,19 @@ def task_transcribe():
         g_task_dic[tan_data.task_id] = tan_data
 
 
-def now_time() -> str:
-    return datetime.now().strftime("%H:%M:%S")
+# 检测音频是什么语言
+def detect_language(audio_file: str) -> str:
+
+    logger.info("Detecting language...")
+    # load audio and pad/trim it to fit 30 seconds
+    audio = whisper.load_audio(audio_file)
+    audio = whisper.pad_or_trim(audio)
+    # make log-Mel spectrogram and move to the same device as the model
+    mel = whisper.log_mel_spectrogram(audio).to(g_model.device)
+    # detect the spoken language
+    _, probs = g_model.detect_language(mel)
+    logger.info(f"Detected language: {max(probs, key=probs.get)}")
+    return max(probs, key=probs.get)
 
 
 if __name__ == '__main__':
