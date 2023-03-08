@@ -78,6 +78,9 @@ def transcribe():
         # 获取任务
         # 获取 JSON 数据
         jdata = request.get_json()
+        # 判断文件是否存在
+        if not Path(jdata["input_audio"]).exists():
+            return jsonify({"code": 400, "msg": "file not found"})
         tdata = TranscribeData(jdata["task_id"], jdata["input_audio"])
         add_task(tdata)
         return jsonify({"code": 200, "msg": "ok"})
