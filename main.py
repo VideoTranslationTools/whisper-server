@@ -1,4 +1,6 @@
 import time
+from loguru import logger
+from datetime import datetime
 
 import whisper
 from whisper.utils import ResultWriter, WriteTXT, WriteSRT, WriteVTT, WriteTSV, WriteJSON
@@ -7,6 +9,7 @@ from pathlib import Path
 import argparse
 from flask import Flask, request, jsonify
 from threading import Thread
+
 # 参数解析
 parser = argparse.ArgumentParser()
 # GPU ID
@@ -49,7 +52,6 @@ def hello():
 
 @app.route('/transcribe', methods=["GET", "POST"])
 def transcribe():
-
     if request.headers.get('Authorization'):
         get_token = request.headers['Authorization']
         if get_token == "":
@@ -85,7 +87,6 @@ def transcribe():
 
 # 添加任务到队列中
 def add_task(data: TranscribeData):
-
     global g_task_dic, g_task_list
 
     if data.task_id in g_task_dic:
@@ -112,7 +113,6 @@ def get_task_status(task_id: int):
 
 # 任务线程
 def task_transcribe():
-
     global g_task_dic, g_task_list
     # 循环获取任务
     while True:
@@ -128,9 +128,9 @@ def task_transcribe():
         # 更新任务的状态
         g_task_dic[tan_data.task_id] = tan_data
 
-        print("Transcription", tan_data.task_id, "start...")
+        logger.info("Transcription {task_id} start...", task_id=tan_data.task_id)
         transcribe_result = g_model.transcribe(tan_data.input_audio)
-        print("Transcription", tan_data.task_id, "complete.")
+        logger.info("Transcription {task_id} complete.", task_id=tan_data.task_id)
         # 构建输出的路径
         p = Path(tan_data.input_audio)
         writer_srt = WriteSRT(str(p.parent))
@@ -145,25 +145,31 @@ def task_transcribe():
         g_task_dic[tan_data.task_id] = tan_data
 
 
+def now_time() -> str:
+    return datetime.now().strftime("%H:%M:%S")
+
+
 if __name__ == '__main__':
 
     device = "cuda:" + str(arg_dict['gpu_id']) if torch.cuda.is_available() else "cpu"
     if device.startswith("cuda"):
-        print("Using GPU:", torch.cuda.get_device_name(arg_dict['gpu_id']), "(", arg_dict['gpu_id'], ")")
+        logger.info("Using GPU: {gpu_id_name} ({gpu_id})",
+                    gpu_id_name=torch.cuda.get_device_name(arg_dict['gpu_id']),
+                    gpu_id=arg_dict['gpu_id'])
         # 设置是那个GPU
         torch.cuda.set_device(arg_dict['gpu_id'])
     else:
-        print("Using CPU")
+        logger.info("Using CPU")
     # 加载模型
-    print("Loading model:", arg_dict['model'], "...")
+    logger.info("Loading model: {mpdel_name} ...", mpdel_name=arg_dict['model'])
     g_model = whisper.load_model(arg_dict['model'])
-    print("Whisper model loaded.")
+    logger.info("Whisper model loaded.")
 
     # 启动任务线程
-    print("Start task thread...")
+    logger.info("Start task thread...")
     t1 = Thread(target=task_transcribe)
     t1.start()
 
-    print("Try start server...")
+    logger.info("Try start server...")
     # 启动服务
     app.run(host='0.0.0.0', port=arg_dict['port'])
