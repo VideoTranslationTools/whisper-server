@@ -1,6 +1,5 @@
 import time
 from loguru import logger
-from datetime import datetime
 
 import whisper
 from whisper.utils import WriteSRT, WriteJSON
@@ -9,6 +8,7 @@ from pathlib import Path
 import argparse
 from flask import Flask, request, jsonify
 from threading import Thread
+from enum import Enum
 
 # 参数解析
 parser = argparse.ArgumentParser()
@@ -36,13 +36,20 @@ g_task_list = []
 g_token = arg_dict['token']
 
 
-# 任务的状态 0 "pending", 1 "running", 2 "finished", 3 "error"
+# 任务的状态
+class TaskStatus(Enum):
+    pending = 1
+    running = 2
+    finished = 3
+    error = 4
+
+
 # 语音识别任务的数据结构
 class TranscribeData:
     def __init__(self, task_id: int, input_audio_full_path: str):
         self.task_id = task_id
         self.input_audio = input_audio_full_path
-        self.task_status = 0
+        self.task_status = TaskStatus.pending
         self.language = ""
 
 
@@ -73,7 +80,7 @@ def transcribe():
         if task_status is None:
             return jsonify({"code": 400, "msg": "task not found"})
         else:
-            return jsonify({"code": 200, "status": task_status})
+            return jsonify({"code": 200, "status": str(task_status.value)})
 
     elif request.method == 'POST':
         # 获取任务
@@ -109,8 +116,8 @@ def get_task_status(task_id: int):
         return None
     # 任务存在
     status = g_task_dic[task_id].task_status
-    if status != 0 and status != 1:
-        # 如果 任务状态不是 0 和 1，说明任务已经完成，删除任务
+    if status != TaskStatus.pending and status != TaskStatus.running:
+        # 如果 任务状态不是 pending 和 running，说明任务已经完成，删除任务
         del g_task_dic[task_id]
     return status
 
@@ -128,7 +135,7 @@ def task_transcribe():
         # 从队列中取出一个任务执行
         tan_data = g_task_list.pop(0)
         # 任务状态设置为运行中
-        tan_data.task_status = 1
+        tan_data.task_status = TaskStatus.running
         # 更新任务的状态
         g_task_dic[tan_data.task_id] = tan_data
 
@@ -137,7 +144,7 @@ def task_transcribe():
         # 检测文件是否存在
         if not Path(tan_data.input_audio).exists():
             logger.error("File {file} not found.", file=tan_data.input_audio)
-            tan_data.task_status = 3
+            tan_data.task_status = TaskStatus.error
             g_task_dic[tan_data.task_id] = tan_data
             continue
 
@@ -146,12 +153,14 @@ def task_transcribe():
             audio_lang = detect_language(tan_data.input_audio)
             logger.info("Transcription {task_id} use language {language}.",
                         task_id=tan_data.task_id, language=audio_lang)
-            transcribe_result = g_model.transcribe(tan_data.input_audio, language=audio_lang)
+            transcribe_result = g_model.transcribe(tan_data.input_audio, 
+            language=audio_lang)
         else:
             # 使用提交的语言
             logger.info("Transcription {task_id} use language {language}.",
                         task_id=tan_data.task_id, language=tan_data.language)
-            transcribe_result = g_model.transcribe(tan_data.input_audio, language=tan_data.language)
+            transcribe_result = g_model.transcribe(tan_data.input_audio, 
+            language=tan_data.language)
 
         logger.info("Transcription {task_id} complete.", task_id=tan_data.task_id)
         # 构建输出的路径
@@ -163,7 +172,7 @@ def task_transcribe():
         writer_json(transcribe_result, tan_data.input_audio)
 
         # 任务状态设置为完成
-        tan_data.task_status = 2
+        tan_data.task_status = TaskStatus.finished
         # 更新任务的状态
         g_task_dic[tan_data.task_id] = tan_data
 
