@@ -1,1 +1,1 @@
-conda activate whisper & python main.py
+conda activate whisper & python main.py --asr whisperx
