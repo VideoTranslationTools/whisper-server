@@ -1,6 +1,9 @@
 import time
+from os import path
+
 from loguru import logger
 
+import stable_whisper
 import whisper
 from whisper.utils import WriteSRT, WriteJSON
 import torch
@@ -168,6 +171,8 @@ def task_transcribe():
         writer_srt = WriteSRT(str(p.parent))
         writer_json = WriteJSON(str(p.parent))
         # 写入文件
+        out_srt = path.join(p.parent, p.stem + '.srt')
+        stable_whisper.results_to_sentence_srt(transcribe_result, out_srt)
         writer_srt(transcribe_result, tan_data.input_audio)
         writer_json(transcribe_result, tan_data.input_audio)
 
@@ -205,7 +210,8 @@ if __name__ == '__main__':
         logger.info("Using CPU")
     # 加载模型
     logger.info("Loading model: {mpdel_name} ...", mpdel_name=arg_dict['model'])
-    g_model = whisper.load_model(arg_dict['model'])
+    # g_model = whisper.load_model(arg_dict['model'])
+    g_model = stable_whisper.load_model(arg_dict['model'])
     logger.info("Whisper model loaded.")
 
     # 启动任务线程
