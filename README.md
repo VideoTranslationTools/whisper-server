@@ -18,7 +18,7 @@
 
 ```shell
 # 核心库，使用了 fast-whisper
-pip install -U whisper-ctranslate2
+pip install -U faster-whisper
 # 日志库
 pip install loguru
 # flask
