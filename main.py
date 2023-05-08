@@ -1,22 +1,18 @@
 import time
 from os import path
 
+import pysubs2
 from loguru import logger
 
-import whisperx
-from whisperx.utils import write_txt, write_srt, format_timestamp
-
-import stable_whisper
-import whisper
-from whisper.utils import WriteSRT, WriteJSON
-import torch
 from pathlib import Path
 import argparse
 from flask import Flask, request, jsonify
 from threading import Thread
 from enum import Enum
 
-from typing import TextIO, Iterator
+from faster_whisper import WhisperModel
+
+model_size = "large-v2"
 
 
 # 任务的状态
@@ -27,26 +23,50 @@ class TaskStatus(Enum):
     error = 4
 
 
-# 任务的状态
-class ASRs(Enum):
-    whisper = 'whisper'
-    whisperx = 'whisperx'
-    stable_whisper = 'stable_whisper'
-
-
 # 参数解析
 parser = argparse.ArgumentParser()
+# device
+'''
+    cuda
+    cpu
+'''
+parser.add_argument("--device", default='auto', type=str)
+# compute_type
+'''
+choices=[
+            "default",
+            "int8",
+            "int8_float16",
+            "int16",
+            "float16",
+            "float32",
+        ],
+'''
+parser.add_argument("--compute_type", default='default', type=str)
 # GPU ID
 parser.add_argument("--gpu_id", default='0', type=int)
 # 模型
-parser.add_argument("--model", default='large', type=str)  # tiny base small medium large
+'''
+MODEL_NAMES = [
+    "tiny",
+    "tiny.en",
+    "base",
+    "base.en",
+    "small",
+    "small.en",
+    "medium",
+    "medium.en",
+    "large-v1",
+    "large-v2",
+]
+'''
+parser.add_argument("--model_size", default='large-v2', type=str)  # tiny base small medium large
 # 启动的端口
 parser.add_argument("--port", default='5000', type=int)
 # http 接口的 token
 parser.add_argument("--token", default='1234567890', type=str)
-# 使用那个模型
-# http 接口的 token
-parser.add_argument("--asr", default=ASRs.whisper.value, type=str)
+# 是否使用 VAD 进行语言的识别修正时间轴
+parser.add_argument("--vad", default=True, type=bool)
 # 解析参数
 args = parser.parse_args()
 # 将arg_dict转换为dict格式
@@ -54,23 +74,13 @@ arg_dict = args.__dict__
 
 app = Flask(__name__)
 # 全局模型的实例
-g_model = whisper.model
+g_model = ""
 # 全局的任务字典
 g_task_dic = {}
 # 全局的任务列表
 g_task_list = []
 # http 接口的 token
 g_token = arg_dict['token']
-# 使用那个模型
-g_asr_model = arg_dict['asr']
-# "Seconds before and after to extend the whisper segments for alignment"
-ALIGN_EXTEND = 2
-# "Whether to clip the alignment start time of current segment to the end time of the last aligned word of the
-# previous segment
-ALIGN_FROM_PREV = True
-# ["nearest", "linear", "ignore"], help="For word .srt, method to assign timestamps to non-aligned words,
-# or merge them into neighbouring.")
-INTERPOLATE_METHOD = "nearest"
 
 
 # 语音识别任务的数据结构
@@ -177,52 +187,28 @@ def task_transcribe():
             g_task_dic[tan_data.task_id] = tan_data
             continue
 
-        if tan_data.language == "":
-            # 检测语言
-            audio_lang = detect_language(tan_data.input_audio)
-            logger.info("Transcription {task_id} use language {language}.",
-                        task_id=tan_data.task_id, language=audio_lang)
-            transcribe_result = g_model.transcribe(tan_data.input_audio,
-                                                   language=audio_lang)
-        else:
-            # 使用提交的语言
-            logger.info("Transcription {task_id} use language {language}.",
-                        task_id=tan_data.task_id, language=tan_data.language)
-            transcribe_result = g_model.transcribe(tan_data.input_audio,
-                                                   language=tan_data.language)
+        # 开始转换，注意，下面这句话不会马上开始执行，而是在 segments 遍历的时候才真正开始
+        segments, info = g_model.transcribe(audio=tan_data.input_audio, vad_filter=arg_dict['vad'])
+        # to use pysubs2, the argument must be a segment list-of-dicts
+        results = []
+        index = 0
+        for s in segments:
+            print(str(index), s.start, s.end, s.text)
+            segment_dict = {'start': s.start, 'end': s.end, 'text': s.text}
+            results.append(segment_dict)
+            index += 1
 
-        logger.info("Transcription {task_id} complete.", task_id=tan_data.task_id)
+        subs = pysubs2.load_from_whisper(results)
         # 构建输出的路径
         p = Path(tan_data.input_audio)
-        out_srt = path.join(p.parent, p.stem + '.srt')
-        if g_asr_model == ASRs.whisper.value:
-            writer_srt = WriteSRT(str(p.parent))
-            writer_json = WriteJSON(str(p.parent))
-            writer_srt(transcribe_result, tan_data.input_audio)
-            writer_json(transcribe_result, tan_data.input_audio)
-        elif g_asr_model == ASRs.stable_whisper.value:
-            # 写入文件
-            stable_whisper.results_to_sentence_srt(transcribe_result, out_srt)
-        elif g_asr_model == ASRs.whisperx.value:
+        out_srt_path = path.join(p.parent, p.stem + '.srt')
+        out_ass_path = path.join(p.parent, p.stem + '.ass')
+        # save srt file
+        subs.save(out_srt_path)
+        # save ass file
+        subs.save(out_ass_path)
 
-            logger.info("Transcription {task_id} aligning...", task_id=tan_data.task_id)
-
-            # load alignment model and metadata
-            model_a, metadata = whisperx.load_align_model(language_code=transcribe_result["language"], device=device)
-            # align whisper output
-            result_aligned = whisperx.align(transcribe_result["segments"], model_a, metadata, tan_data.input_audio,
-                                            device,
-                                            extend_duration=ALIGN_EXTEND, start_from_previous=ALIGN_FROM_PREV,
-                                            interpolate_method=INTERPOLATE_METHOD
-                                            )
-            logger.info("Transcription {task_id} aligned.", task_id=tan_data.task_id)
-
-            with open(out_srt, "w", encoding="utf-8") as srt:
-                whisperx_write_srt(result_aligned["segments"], file=srt)
-        else:
-            raise Exception("Unknown ASR model.")
-
-        logger.info("Transcription {task_id} saved to {file}.", task_id=tan_data.task_id, file=out_srt)
+        logger.info("Transcription {task_id} saved to {file}.", task_id=tan_data.task_id, file=out_srt_path)
 
         # 任务状态设置为完成
         tan_data.task_status = TaskStatus.finished
@@ -230,74 +216,13 @@ def task_transcribe():
         g_task_dic[tan_data.task_id] = tan_data
 
 
-# 检测音频是什么语言
-def detect_language(audio_file: str) -> str:
-    logger.info("Detecting language...")
-    # load audio and pad/trim it to fit 30 seconds
-    audio = whisper.load_audio(audio_file)
-    audio = whisper.pad_or_trim(audio)
-    # make log-Mel spectrogram and move to the same device as the model
-    mel = whisper.log_mel_spectrogram(audio).to(g_model.device)
-    # detect the spoken language
-    _, probs = g_model.detect_language(mel)
-    logger.info(f"Detected language: {max(probs, key=probs.get)}")
-    return max(probs, key=probs.get)
-
-
-# whisperx 写 srt 的方法
-def whisperx_write_srt(transcript: Iterator[dict], file: TextIO, spk_colors=None):
-    """
-    Write a transcript to a file in SRT format.
-    Example usage:
-        from pathlib import Path
-        from whisper.utils import write_srt
-        result = transcribe(model, audio_path, temperature=temperature, **args)
-        # save SRT
-        audio_basename = Path(audio_path).stem
-        with open(Path(output_dir) / (audio_basename + ".srt"), "w", encoding="utf-8") as srt:
-            write_srt(result["segments"], file=srt)
-    """
-    # spk_colors = {'SPEAKER_00':'white','SPEAKER_01':'yellow'}
-    for i, segment in enumerate(transcript, start=1):
-        # write srt lines
-
-        text = f"{segment['text'].strip().replace('-->', '->')}"
-        if spk_colors and 'speaker' in segment.keys():
-            # f'<font color="{spk_colors[sentence.speaker]}">{text}</font>'
-            text = f'<font color="{spk_colors[segment["speaker"]]}">{text}</font>'
-        text += "\n"
-        print(
-            f"{i}\n"
-            f"{format_timestamp(segment['start'], always_include_hours=True, decimal_marker=',')} --> "
-            f"{format_timestamp(segment['end'], always_include_hours=True, decimal_marker=',')}\n"
-            f"{text}",
-            file=file,
-            flush=True,
-        )
-
-
 if __name__ == '__main__':
 
-    device = "cuda:" + str(arg_dict['gpu_id']) if torch.cuda.is_available() else "cpu"
-    if device.startswith("cuda"):
-        logger.info("Using GPU: {gpu_id_name} ({gpu_id})",
-                    gpu_id_name=torch.cuda.get_device_name(arg_dict['gpu_id']),
-                    gpu_id=arg_dict['gpu_id'])
-        # 设置是那个GPU
-        torch.cuda.set_device(arg_dict['gpu_id'])
-    else:
-        logger.info("Using CPU")
+    logger.info("Device: {device_name}", device_name=arg_dict['device'])
     # 加载模型
-    logger.info("Loading model: {mpdel_name} ...", mpdel_name=arg_dict['model'])
+    logger.info("Loading model: {model_name} ...", model_name=arg_dict['model_size'])
 
-    if g_asr_model == ASRs.whisper.value:
-        g_model = whisper.load_model(arg_dict['model'])
-    elif g_asr_model == ASRs.stable_whisper.value:
-        g_model = stable_whisper.load_model(arg_dict['model'])
-    elif g_asr_model == ASRs.whisperx.value:
-        g_model = whisperx.load_model(arg_dict['model'])
-    else:
-        raise Exception("Unknown ASR model.")
+    g_model = WhisperModel(arg_dict['model_size'], device=arg_dict['device'], compute_type=arg_dict['compute_type'])
 
     logger.info("Whisper model loaded.")
 
