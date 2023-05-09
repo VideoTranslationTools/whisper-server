@@ -1,7 +1,8 @@
 import time
 from os import path
+from typing import Iterator, TextIO
 
-import pysubs2
+import torch
 from loguru import logger
 
 from pathlib import Path
@@ -10,9 +11,14 @@ from flask import Flask, request, jsonify
 from threading import Thread
 from enum import Enum
 
-from faster_whisper import WhisperModel
+import whisperx
+from whisperx.utils import format_timestamp
 
 model_size = "large-v2"
+
+# ["nearest", "linear", "ignore"], help="For word .srt, method to assign timestamps to non-aligned words,
+# or merge them into neighbouring.")
+INTERPOLATE_METHOD = "nearest"
 
 
 # 任务的状态
@@ -30,7 +36,9 @@ parser = argparse.ArgumentParser()
     cuda
     cpu
 '''
-parser.add_argument("--device", default='auto', type=str)
+parser.add_argument("--device", default='cuda', type=str)
+# device_index gpu 的时候有效 "0,1,2,3" or "0"
+parser.add_argument("--device_index", default="0", type=str)
 # compute_type
 '''
 choices=[
@@ -81,6 +89,12 @@ g_task_dic = {}
 g_task_list = []
 # http 接口的 token
 g_token = arg_dict['token']
+# device index
+# 将 "0,1,2,3" or "0" 转换为 [0,1,2,3] or [0]
+if arg_dict['device_index'].find(",") != -1:
+    g_device_index = [int(x) for x in arg_dict['device_index'].split(",")]
+else:
+    g_device_index = [int(arg_dict['device_index'])]
 
 
 # 语音识别任务的数据结构
@@ -187,26 +201,41 @@ def task_transcribe():
             g_task_dic[tan_data.task_id] = tan_data
             continue
 
+        # 计算执行的耗时
+        start_time = time.time()
+        audio = whisperx.load_audio(tan_data.input_audio)
+        batch_size = 16  # reduce if low on GPU mem
         # 开始转换，注意，下面这句话不会马上开始执行，而是在 segments 遍历的时候才真正开始
-        segments, info = g_model.transcribe(audio=tan_data.input_audio, vad_filter=arg_dict['vad'])
-        # to use pysubs2, the argument must be a segment list-of-dicts
-        results = []
-        index = 0
-        for s in segments:
-            print(str(index), s.start, s.end, s.text)
-            segment_dict = {'start': s.start, 'end': s.end, 'text': s.text}
-            results.append(segment_dict)
-            index += 1
+        transcribe_result = g_model.transcribe(audio=audio, batch_size=batch_size)
+        logger.info("Transcription {task_id} aligning...", task_id=tan_data.task_id)
+        # load alignment model and metadata
+        model_a, metadata = whisperx.load_align_model(language_code=transcribe_result["language"],
+                                                      device=arg_dict['device'])
+        # align whisper output
+        result_aligned = whisperx.align(transcribe_result["segments"], model_a, metadata, tan_data.input_audio,
+                                        arg_dict['device'],
+                                        interpolate_method=INTERPOLATE_METHOD,
+                                        return_char_alignments=False,
+                                        )
+        logger.info("Transcription {task_id} aligned.", task_id=tan_data.task_id)
 
-        subs = pysubs2.load_from_whisper(results)
         # 构建输出的路径
         p = Path(tan_data.input_audio)
         out_srt_path = path.join(p.parent, p.stem + '.srt')
-        out_ass_path = path.join(p.parent, p.stem + '.ass')
-        # save srt file
-        subs.save(out_srt_path)
-        # save ass file
-        subs.save(out_ass_path)
+
+        with open(out_srt_path, "w", encoding="utf-8") as srt:
+            whisperx_write_srt(result_aligned["segments"], file=srt)
+
+        # 计算执行的耗时
+        end_time = time.time()
+
+        # 清理缓存
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        logger.info("Transcription:(transcribe) {task_id} end, time: {time} s", task_id=tan_data.task_id,
+                    time=(end_time - start_time))
 
         logger.info("Transcription {task_id} saved to {file}.", task_id=tan_data.task_id, file=out_srt_path)
 
@@ -216,13 +245,45 @@ def task_transcribe():
         g_task_dic[tan_data.task_id] = tan_data
 
 
-if __name__ == '__main__':
+# whisperx 写 srt 的方法
+def whisperx_write_srt(transcript: Iterator[dict], file: TextIO, spk_colors=None):
+    """
+    Write a transcript to a file in SRT format.
+    Example usage:
+        from pathlib import Path
+        from whisper.utils import write_srt
+        result = transcribe(model, audio_path, temperature=temperature, **args)
+        # save SRT
+        audio_basename = Path(audio_path).stem
+        with open(Path(output_dir) / (audio_basename + ".srt"), "w", encoding="utf-8") as srt:
+            write_srt(result["segments"], file=srt)
+    """
+    # spk_colors = {'SPEAKER_00':'white','SPEAKER_01':'yellow'}
+    for i, segment in enumerate(transcript, start=1):
+        # write srt lines
 
+        text = f"{segment['text'].strip().replace('-->', '->')}"
+        if spk_colors and 'speaker' in segment.keys():
+            # f'<font color="{spk_colors[sentence.speaker]}">{text}</font>'
+            text = f'<font color="{spk_colors[segment["speaker"]]}">{text}</font>'
+        text += "\n"
+        print(
+            f"{i}\n"
+            f"{format_timestamp(segment['start'], always_include_hours=True, decimal_marker=',')} --> "
+            f"{format_timestamp(segment['end'], always_include_hours=True, decimal_marker=',')}\n"
+            f"{text}",
+            file=file,
+            flush=True,
+        )
+
+
+if __name__ == '__main__':
     logger.info("Device: {device_name}", device_name=arg_dict['device'])
     # 加载模型
     logger.info("Loading model: {model_name} ...", model_name=arg_dict['model_size'])
 
-    g_model = WhisperModel(arg_dict['model_size'], device=arg_dict['device'], compute_type=arg_dict['compute_type'])
+    g_model = whisperx.load_model(arg_dict['model_size'], device=arg_dict['device'],
+                                  compute_type=arg_dict['compute_type'])
 
     logger.info("Whisper model loaded.")
 
