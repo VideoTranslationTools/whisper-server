@@ -143,6 +143,9 @@ def transcribe():
         if not Path(jdata["input_audio"]).exists():
             return jsonify({"code": 400, "msg": "file not found"})
         tdata = TranscribeData(jdata["task_id"], jdata["input_audio"])
+        # 如果设置了音频的语言，就使用设置的语言
+        if jdata["language"] != "":
+            tdata.language = jdata["language"]
         add_task(tdata)
         return jsonify({"code": 200, "msg": "ok"})
     else:
@@ -209,7 +212,12 @@ def task_transcribe():
         transcribe_result = g_model.transcribe(audio=audio, batch_size=batch_size)
         logger.info("Transcription {task_id} aligning...", task_id=tan_data.task_id)
         # load alignment model and metadata
-        model_a, metadata = whisperx.load_align_model(language_code=transcribe_result["language"],
+        # 优先使用外部指定的音频语言
+        now_audio_language_code = tan_data.language
+        if now_audio_language_code == "":
+            # 如果外部没有指定，那么就用自动检测的语言
+            now_audio_language_code = transcribe_result["language"]
+        model_a, metadata = whisperx.load_align_model(language_code=now_audio_language_code,
                                                       device=arg_dict['device'])
         # align whisper output
         result_aligned = whisperx.align(transcribe_result["segments"], model_a, metadata, tan_data.input_audio,
