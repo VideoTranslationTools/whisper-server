@@ -131,9 +131,9 @@ def transcribe():
         # 获取任务的状态
         task_status = get_task_status(int(task_id))
         if task_status is None:
-            return jsonify({"code": 400, "msg": "task not found"})
+            return jsonify({"code": 400, "msg": "task not found", "status": 3})
         else:
-            return jsonify({"code": 200, "status": str(task_status.value)})
+            return jsonify({"code": 200, "msg": "ok", "status": task_status.value})
 
     elif request.method == 'POST':
         # 获取任务
@@ -147,9 +147,9 @@ def transcribe():
         if jdata["language"] != "":
             tdata.language = jdata["language"]
         add_task(tdata)
-        return jsonify({"code": 200, "msg": "ok"})
+        return jsonify({"code": 200, "msg": "ok", "status": tdata.task_status.value})
     else:
-        return jsonify({"code": 400, "msg": "error"})
+        return jsonify({"code": 400, "msg": "error", "status": 3})
 
 
 # 添加任务到队列中
