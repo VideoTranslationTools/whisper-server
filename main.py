@@ -14,7 +14,7 @@ from enum import Enum
 import whisperx
 from whisperx.utils import format_timestamp
 
-model_size = "large-v2"
+model_size = "large-v3"
 
 # ["nearest", "linear", "ignore"], help="For word .srt, method to assign timestamps to non-aligned words,
 # or merge them into neighbouring.")
@@ -66,9 +66,10 @@ MODEL_NAMES = [
     "medium.en",
     "large-v1",
     "large-v2",
+    "large-v3",
 ]
 '''
-parser.add_argument("--model_size", default='large-v2', type=str)  # tiny base small medium large
+parser.add_argument("--model_size", default='large-v3', type=str)  # tiny base small medium large
 # 启动的端口
 parser.add_argument("--port", default='5000', type=int)
 # http 接口的 token

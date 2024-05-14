@@ -44,3 +44,8 @@ A：去这个地方下载 https://docs.nvidia.com/deeplearning/cudnn/install-gui
 Q：安装完支持库后，运行提示 CUDA 无法启用什么的
 
 A：再重装一次 torch···pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu117
+
+
+## pyinstaller 打包
+
+`pyinstaller --onefile --hidden-import=loguru --hidden-import=whisperx --hidden-import=torch --hidden-import=falsk --hidden-import=pyannote --hidden-import=pyannote.audio.models  --hidden-import=pyannote.audio.models.segmentation  --hidden-import=torchaudio --add-data "C:\ProgramData\Anaconda3\envs\whisperx\Lib\site-packages\lightning_fabric;lightning_fabric"  --add-data  "C:\ProgramData\Anaconda3\envs\whisperx\Lib\site-packages\speechbrain;speechbrain"  .\main.py`
