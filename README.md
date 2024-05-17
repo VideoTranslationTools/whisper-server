@@ -48,4 +48,4 @@ A：再重装一次 torch···pip3 install torch torchvision torchaudio --index
 
 ## pyinstaller 打包
 
-`pyinstaller --onefile --hidden-import=loguru --hidden-import=whisperx --hidden-import=torch --hidden-import=falsk --hidden-import=pyannote --hidden-import=pyannote.audio.models  --hidden-import=pyannote.audio.models.segmentation  --hidden-import=torchaudio --add-data "C:\ProgramData\Anaconda3\envs\whisperx\Lib\site-packages\lightning_fabric;lightning_fabric"  --add-data  "C:\ProgramData\Anaconda3\envs\whisperx\Lib\site-packages\speechbrain;speechbrain"  .\main.py`
+`pyinstaller --onefile --hidden-import=loguru --hidden-import=whisperx --hidden-import=torch --hidden-import=falsk --hidden-import=pyannote --hidden-import=pyannote.audio.models  --hidden-import=pyannote.audio.models.segmentation  --hidden-import=torchaudio --add-data "C:\ProgramData\Anaconda3\envs\whisperx\Lib\site-packages\lightning_fabric;lightning_fabric"  --add-data  "C:\ProgramData\Anaconda3\envs\whisperx\Lib\site-packages\speechbrain;speechbrain" --add-data "C:\ProgramData\Anaconda3\envs\whisperx\Lib\site-packages\whisperx;whisperx" .\main.py`

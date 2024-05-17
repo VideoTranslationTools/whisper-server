@@ -1,3 +1,4 @@
+import sys
 import time
 from os import path
 from typing import Iterator, TextIO
@@ -107,6 +108,21 @@ class TranscribeData:
         self.language = ""
 
 
+def is_authorization():
+    if request.headers.get('Authorization'):
+        get_token = request.headers['Authorization']
+        if get_token == "":
+            return False
+        tokens = str.split(get_token, " ")
+        if len(tokens) != 2:
+            return False
+        if tokens[1] != g_token:
+            return False
+    else:
+        return False
+    return True
+
+
 @app.route('/')
 def hello():
     return 'hello world!'
@@ -114,16 +130,8 @@ def hello():
 
 @app.route('/transcribe', methods=["GET", "POST"])
 def transcribe():
-    if request.headers.get('Authorization'):
-        get_token = request.headers['Authorization']
-        if get_token == "":
-            return jsonify({"code": 400, "msg": "token error"})
-        tokens = str.split(get_token, " ")
-        if len(tokens) != 2:
-            return jsonify({"code": 400, "msg": "token error"})
-        if tokens[1] != g_token:
-            return jsonify({"code": 400, "msg": "token error"})
-    else:
+
+    if is_authorization() is False:
         return jsonify({"code": 400, "msg": "token error"})
 
     if request.method == 'GET':
