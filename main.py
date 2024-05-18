@@ -309,14 +309,10 @@ if __name__ == '__main__':
     # 加载模型
     logger.info("Loading model: {model_name} ...", model_name=arg_dict['model_size'])
 
-    download_dir = r"C:\temp\model_hub"
-    local_model = r"large-v3"
-    g_model = whisperx.load_model(local_model, device=arg_dict['device'], download_root=download_dir,
-                                  compute_type=arg_dict['compute_type'])
-
     if arg_dict['download_root'] != "":
         download_dir = arg_dict['download_root']
         local_model = arg_dict['model_size']
+        logger.info("Loading model from local:  {model_root} ...", model_root=download_dir)
         g_model = whisperx.load_model(local_model, device=arg_dict['device'], download_root=download_dir,
                                       compute_type=arg_dict['compute_type'])
     else:
