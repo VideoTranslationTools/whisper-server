@@ -71,6 +71,11 @@ MODEL_NAMES = [
 ]
 '''
 parser.add_argument("--model_size", default='large-v3', type=str)  # tiny base small medium large
+
+# 允许加载本地的模型,需要指定这个模型的根目录
+# C:\temp\model_hub
+# C:\temp\model_hub\models--Systran--faster-whisper-large-v3     对应     large-v3
+parser.add_argument("--download_root", default='', type=str)
 # 启动的端口
 parser.add_argument("--port", default='5000', type=int)
 # http 接口的 token
@@ -294,13 +299,29 @@ def whisperx_write_srt(transcript: Iterator[dict], file: TextIO, spk_colors=None
         )
 
 
+server_version = "0.0.1"
+
 if __name__ == '__main__':
+
+    logger.info("Version: {version}", version=server_version)
+
     logger.info("Device: {device_name}", device_name=arg_dict['device'])
     # 加载模型
     logger.info("Loading model: {model_name} ...", model_name=arg_dict['model_size'])
 
-    g_model = whisperx.load_model(arg_dict['model_size'], device=arg_dict['device'],
+    download_dir = r"C:\temp\model_hub"
+    local_model = r"large-v3"
+    g_model = whisperx.load_model(local_model, device=arg_dict['device'], download_root=download_dir,
                                   compute_type=arg_dict['compute_type'])
+
+    if arg_dict['download_root'] != "":
+        download_dir = arg_dict['download_root']
+        local_model = arg_dict['model_size']
+        g_model = whisperx.load_model(local_model, device=arg_dict['device'], download_root=download_dir,
+                                      compute_type=arg_dict['compute_type'])
+    else:
+        g_model = whisperx.load_model(arg_dict['model_size'], device=arg_dict['device'],
+                                      compute_type=arg_dict['compute_type'])
 
     logger.info("Whisper model loaded.")
 
