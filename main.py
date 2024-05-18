@@ -130,7 +130,7 @@ def is_authorization():
 
 @app.route('/')
 def hello():
-    return 'hello world!'
+    return server_version
 
 
 @app.route('/transcribe', methods=["GET", "POST"])
